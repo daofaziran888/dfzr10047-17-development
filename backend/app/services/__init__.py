@@ -23,6 +23,11 @@ from app.services.dup_fingerprint import DupFingerprintService
 from app.services.sample_review import SampleReviewService
 from app.services.parse_metric import ParseMetricService
 from app.services.tmpl_diff import TmplDiffService
+from app.services.impact_scope import (
+    ExpressionHitService,
+    ImpactScopeService,
+    SourceEvidenceService,
+)
 from app.services.intake_audit import IntakeAuditService
 
 SERVICES: dict[str, BaseModuleService] = {
@@ -47,9 +52,23 @@ SERVICES: dict[str, BaseModuleService] = {
     "sample_review": SampleReviewService(),
     "parse_metric": ParseMetricService(),
     "tmpl_diff": TmplDiffService(),
+    "impact_scope": ImpactScopeService(),
+    "expression_hit": ExpressionHitService(),
+    "source_evidence": SourceEvidenceService(),
     "intake_audit": IntakeAuditService(),
 }
 
 
+SERVICE_ALIASES = {
+    "impact-scope": "impact_scope",
+    "impact_scopes": "impact_scope",
+    "impact-scopes": "impact_scope",
+    "impact_scope_order": "impact_scope",
+    "affected_scope": "impact_scope",
+    "affected-scope": "impact_scope",
+    "diff_impact_scope": "impact_scope",
+}
+
+
 def service_for(module: str) -> BaseModuleService | None:
-    return SERVICES.get(module)
+    return SERVICES.get(module) or SERVICES.get(SERVICE_ALIASES.get(module, ""))

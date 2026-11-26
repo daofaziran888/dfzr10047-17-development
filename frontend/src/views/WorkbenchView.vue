@@ -15,6 +15,11 @@
       </div>
     </header>
 
+    <ImpactScopePanel
+      v-if="meta.key === 'tmpl_diff' || meta.key === 'impact_scope'"
+      ref="impactPanel"
+    />
+
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
@@ -60,6 +65,15 @@
             >
               {{ action }}
             </button>
+            <button
+              v-if="meta.key === 'tmpl_diff' && isAmountDiff(row)"
+              class="link impact-entry-link"
+              type="button"
+              :data-testid="`impact-entry-${row['差异编号'] || row.id}`"
+              @click="openImpactScope(row)"
+            >
+              筛选影响批次并领取
+            </button>
           </td>
         </tr>
         <tr v-if="!rows.length">
@@ -71,7 +85,7 @@
     </table>
 
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
-      <form class="modal" @submit.prevent="submitCreate">
+      <form class="modal" role="dialog" aria-modal="true" :aria-label="`登记${meta.entity}`" @submit.prevent="submitCreate">
         <h3>登记{{ meta.entity }}</h3>
         <label v-for="field in meta.fields" :key="field" class="create-field">
           <span>{{ field }}</span>
@@ -104,9 +118,11 @@ import {
   runAction as applyAction,
 } from '@/api/backend-service'
 import type { EntryRow } from '@/data/types'
+import ImpactScopePanel from './ImpactScopePanel.vue'
 
 const props = defineProps<{ moduleKey: string }>()
 const meta = moduleMeta(props.moduleKey)
+const impactPanel = ref<InstanceType<typeof ImpactScopePanel> | null>(null)
 const rows = ref<EntryRow[]>([])
 const total = ref(0)
 const errorMessage = ref('')
@@ -174,6 +190,14 @@ async function runAction(action: string, row: EntryRow) {
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '操作失败'
   }
+}
+
+function isAmountDiff(row: EntryRow): boolean {
+  return `${row['差异字段'] ?? ''} ${row['旧表达式'] ?? ''}`.toLowerCase().includes('amount')
+}
+
+function openImpactScope(row: EntryRow) {
+  void impactPanel.value?.selectDiff(row)
 }
 
 async function reload() {

@@ -130,6 +130,7 @@ class TmplDiffService(BaseModuleService):
                 "差异编号": r.get("差异编号"),
                 "旧模板版本": r.get("旧模板版本"),
                 "新模板版本": r.get("新模板版本"),
+                "差异字段": r.get("差异字段"),
                 "差异字段数": r.get("差异字段数"),
                 "影响批次数": r.get("影响批次数"),
                 "status": r.get("status"),
@@ -137,3 +138,96 @@ class TmplDiffService(BaseModuleService):
             for r in store.rows(self.MODULE)
             if r.get("status") == "偏离超限"
         ]
+
+    def sync_reparse_result(
+        self,
+        diff_ref: str | int | None,
+        batch_no: str,
+        field_name: str,
+        result: dict[str, Any] | str,
+    ) -> dict[str, Any] | None:
+        """接收重解析实际结果，更新差异条目的下一次筛选水位。
+
+        这里只认真实批次执行结果；补录证据形成的候选在执行成功前仍保持待处理，
+        因而不会被误算成已完成。
+        """
+        diff: dict[str, Any] | None = None
+        if diff_ref not in (None, ""):
+            if isinstance(diff_ref, int) or str(diff_ref).isdigit():
+                diff = store.find(self.MODULE, int(diff_ref))
+            if diff is None:
+                diff = next(
+                    (row for row in store.rows(self.MODULE)
+                     if str(row.get("差异编号")) == str(diff_ref)),
+                    None,
+                )
+        if diff is None and field_name:
+            diff = next(
+                (row for row in store.rows(self.MODULE)
+                 if field_name in str(row.get("差异字段") or "").split(",")),
+                None,
+            )
+        if diff is None:
+            return None
+
+        ok = bool(result.get("ok", True)) if isinstance(result, dict) else True
+        state = "成功" if ok else "失败"
+        history = [
+            line for line in str(diff.get("重解析回写记录") or "").split(" | ")
+            if line
+        ]
+        history.append(f"{batch_no}:{field_name}:{state}")
+        diff["重解析回写记录"] = " | ".join(history[-50:])
+        diff["最近同步批次"] = batch_no
+        diff["最近同步字段"] = field_name
+        diff["最近同步结果"] = (
+            result.get("message") if isinstance(result, dict) else str(result)
+        ) or f"{batch_no} {state}"
+
+        completed = {
+            str(hit.get("批次编号"))
+            for hit in store.rows("expression_hit")
+            if str(hit.get("字段名称")) == str(diff.get("差异字段") or field_name)
+            and hit.get("处理状态") == "已完成"
+        }
+        pending = {
+            str(hit.get("批次编号"))
+            for hit in store.rows("expression_hit")
+            if str(hit.get("字段名称")) == str(diff.get("差异字段") or field_name)
+            and hit.get("处理状态") not in {"已完成", "不予受理"}
+            and hit.get("核准命中") == "是"
+        }
+        diff["已完成批次数"] = str(len(completed))
+        diff["待处理批次数"] = str(len(pending))
+        return diff
+
+    def impact_candidates(
+        self,
+        source: str = "",
+        old_expression: str = "",
+        diff_no: str | None = None,
+        **kwargs: Any,
+    ) -> dict[str, Any]:
+        """转发到影响范围服务，便于从模板差异上下文直接筛选真实命中批次。"""
+        from app.services import service_for
+
+        impact = service_for("impact_scope")
+        assert impact is not None
+        payload = {
+            "source": source or kwargs.get("来源渠道") or "甲来源",
+            "old_expression": old_expression or kwargs.get("旧表达式") or "",
+            "diff_id": diff_no or kwargs.get("diff_id") or kwargs.get("差异编号"),
+            **kwargs,
+        }
+        return impact.query_candidates(payload)  # type: ignore[attr-defined]
+
+    query_affected_batches = impact_candidates
+    filter_affected_batches = impact_candidates
+
+    def claim_impact_batches(self, payload: dict[str, Any]) -> tuple[bool, str, dict[str, Any] | None, bool]:
+        """从模板差异上下文提交影响范围领取申请。"""
+        from app.services import service_for
+
+        impact = service_for("impact_scope")
+        assert impact is not None
+        return impact.submit_application(payload)  # type: ignore[attr-defined]
